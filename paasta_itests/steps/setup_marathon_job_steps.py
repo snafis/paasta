@@ -52,7 +52,12 @@ def run_setup_marathon_job_no_apps_found(context):
             soa_dir=context.soa_dir,
             service_instance_list=[context.job_id],
         )
-        setup_marathon_job.main()
+        try:
+            setup_marathon_job.main()
+        except SystemExit as e:
+            if e.code == 0:
+                return
+            raise
 
 
 def run_setup_marathon_job(context):

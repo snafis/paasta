@@ -34,6 +34,7 @@ import signal
 import sys
 import tempfile
 import threading
+import time
 from collections import OrderedDict
 from fnmatch import fnmatch
 from functools import wraps
@@ -1372,25 +1373,6 @@ class TimeoutError(Exception):
     pass
 
 
-def timeout(seconds=10, error_message=os.strerror(errno.ETIME)):
-    def decorator(func):
-        def _handle_timeout(signum, frame):
-            raise TimeoutError(error_message)
-
-        def wrapper(*args, **kwargs):
-            signal.signal(signal.SIGALRM, _handle_timeout)
-            signal.alarm(seconds)
-            try:
-                result = func(*args, **kwargs)
-            finally:
-                signal.alarm(0)
-            return result
-
-        return wraps(func)(wrapper)
-
-    return decorator
-
-
 class Timeout:
     # From http://stackoverflow.com/questions/2281850/timeout-function-if-it-takes-too-long-to-finish
 
@@ -1773,3 +1755,62 @@ def paasta_print(*args, **kwargs):
     assert not kwargs, kwargs
     to_print = sep.join(to_bytes(x) for x in args) + end
     f.write(to_print)
+
+
+def timeout(seconds=10, error_message=os.strerror(errno.ETIME), use_signals=True):
+    if use_signals:
+        def decorate(func):
+            def _handle_timeout(signum, frame):
+                raise TimeoutError(error_message)
+
+            def wrapper(*args, **kwargs):
+                signal.signal(signal.SIGALRM, _handle_timeout)
+                signal.alarm(seconds)
+                try:
+                    result = func(*args, **kwargs)
+                finally:
+                    signal.alarm(0)
+                return result
+
+            return wraps(func)(wrapper)
+    else:
+        def decorate(function):
+            return _Timeout(function, seconds, error_message)
+    return decorate
+
+
+class _Timeout(object):
+    def __init__(self, function, seconds, error_message):
+        self.seconds = seconds
+        self.control = six.moves.queue.Queue()
+        self.function = function
+        self.error_message = error_message
+
+    def run(self, *args, **kwargs):
+        # Try and put the result of the function into the q
+        # if an exception occurrs then we put the exc_info instead
+        # so that it can be raised in the main thread.
+        try:
+            self.control.put((True, self.function(*args, **kwargs)))
+        except Exception:
+            self.control.put((False, sys.exc_info()))
+
+    def __call__(self, *args, **kwargs):
+        self.func_thread = threading.Thread(target=self.run,
+                                            args=args,
+                                            kwargs=kwargs)
+        self.timeout = self.seconds + time.time()
+        self.func_thread.start()
+        return self.get_and_raise()
+
+    def get_and_raise(self):
+        while not self.timeout < time.time():
+            time.sleep(0.01)
+            if not self.func_thread.is_alive():
+                ret = self.control.get()
+                if ret[0]:
+                    return ret[1]
+                else:
+                    exc_info = ret[1]
+                    six.reraise(*exc_info)
+        raise TimeoutError(self.error_message)
