@@ -15,6 +15,7 @@ from __future__ import absolute_import
 from __future__ import unicode_literals
 
 import mock
+import requests
 from pytest import raises
 
 from paasta_tools import drain_lib
@@ -45,6 +46,9 @@ class TestHacheckDrainMethod(object):
         actual = self.drain_method.spool_url(fake_task)
         assert actual is None
 
+    def test_post_spool_handles_errors(self):
+        pass
+
     def test_get_spool(self):
         fake_response = mock.Mock(
             status_code=503,
@@ -65,6 +69,13 @@ class TestHacheckDrainMethod(object):
 
     def test_get_spool_handles_no_ports(self):
         fake_task = mock.Mock(host="fake_host", ports=[])
+        actual = self.drain_method.get_spool(fake_task)
+        assert actual is None
+
+    def test_get_spool_handles_errors(self):
+        fake_task = mock.Mock(host="fake_host", ports=[1234])
+        with mock.patch('requests.get', side_effect=requests.exceptions.ConnectionError, autospec=True):
+            actual = self.drain_method.get_spool(fake_task)
         actual = self.drain_method.get_spool(fake_task)
         assert actual is None
 

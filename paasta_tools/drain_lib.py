@@ -14,6 +14,7 @@
 from __future__ import absolute_import
 from __future__ import unicode_literals
 
+import logging
 import re
 import time
 
@@ -22,6 +23,8 @@ import requests
 from paasta_tools.utils import get_user_agent
 
 _drain_methods = {}
+log = logging.getLogger(__name__)
+log.addHandler(logging.NullHandler())
 
 
 def register_drain_method(name):
@@ -159,23 +162,30 @@ class HacheckDrainMethod(DrainMethod):
     def post_spool(self, task, status):
         spool_url = self.spool_url(task)
         if spool_url is not None:
-            resp = requests.post(
-                self.spool_url(task),
-                data={
-                    'status': status,
-                    'expiration': time.time() + self.expiration,
-                    'reason': 'Drained by Paasta',
-                },
-                headers={'User-Agent': get_user_agent()},
-            )
-            resp.raise_for_status()
+            try:
+                requests.post(
+                    self.spool_url(task),
+                    data={
+                        'status': status,
+                        'expiration': time.time() + self.expiration,
+                        'reason': 'Drained by Paasta',
+                    },
+                    headers={'User-Agent': get_user_agent()},
+                )
+            except requests.exceptions.RequestException as e:
+                log.error("Posting the spool from {} failed: {}".format(spool_url, e))
+                return None
 
     def get_spool(self, task):
         """Query hacheck for the state of a task, and parse the result into a dictionary."""
         spool_url = self.spool_url(task)
         if spool_url is None:
             return None
-        response = requests.get(self.spool_url(task), headers={'User-Agent': get_user_agent()})
+        try:
+            response = requests.get(self.spool_url(task), headers={'User-Agent': get_user_agent()})
+        except requests.exceptions.RequestException as e:
+            log.error("Getting the spool from {} failed: {}".format(spool_url, e))
+            return None
         if response.status_code == 200:
             return {
                 'state': 'up',
@@ -211,14 +221,19 @@ class HacheckDrainMethod(DrainMethod):
 
     def is_draining(self, task):
         info = self.get_spool(task)
-        if info is None or info["state"] == "up":
+        if info is None:
+            return True
+        elif info["state"] == "up":
             return False
         else:
             return True
 
     def is_safe_to_kill(self, task):
         info = self.get_spool(task)
-        if info is None or info["state"] == "up":
+        if info is None:
+            log.error("HAcheck spool unavailable for {}, assuming it is safe to kill.".format(task))
+            return True
+        elif info["state"] == "up":
             return False
         else:
             return info.get("since", 0) < (time.time() - self.delay)
