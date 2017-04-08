@@ -56,6 +56,7 @@ from paasta_tools.utils import load_system_paasta_config
 from paasta_tools.utils import NoConfigurationForServiceError
 from paasta_tools.utils import paasta_print
 from paasta_tools.utils import PaastaNotConfiguredError
+from paasta_tools.utils import time_cache
 
 CONTAINER_PORT = 8888
 # Marathon creates Mesos tasks with an id composed of the app's full name, a
@@ -812,9 +813,7 @@ def list_all_marathon_app_ids(client):
     in the original form, without leading "/"'s.
 
     returns: List of app ids in the same format they are POSTed."""
-    all_app_ids = [app.id for app in client.list_apps()]
-    stripped_app_ids = [app_id.lstrip('/') for app_id in all_app_ids]
-    return stripped_app_ids
+    return [app.id.lstrip('/') for app in get_all_marathon_apps(client)]
 
 
 def is_app_id_running(app_id, client):
@@ -923,6 +922,7 @@ def get_matching_apps(servicename, instance, marathon_apps):
     return [app for app in marathon_apps if app.id.startswith(expected_prefix)]
 
 
+@time_cache(ttl=5)  # 5 seconds
 def get_all_marathon_apps(client, embed_failures=False):
     return client.list_apps(embed_failures=embed_failures)
 

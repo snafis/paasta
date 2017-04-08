@@ -1629,7 +1629,7 @@ class TestMarathonTools:
         ]
         list_apps_mock = mock.Mock(return_value=apps)
         fake_client = mock.Mock(list_apps=list_apps_mock)
-        actual = marathon_tools.get_all_marathon_apps(fake_client)
+        actual = marathon_tools.get_all_marathon_apps(fake_client, ttl=0)
         assert actual == apps
 
 
